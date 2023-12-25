@@ -63,40 +63,46 @@ class Server:
 
 
 async def handle_client(reader, writer, server):
-    while True:
-        data = await reader.read(100)
-        if not data:
-            break
+    try:
+        while True:
+            data = await reader.read(100)
+            if not data:
+                break
 
-        message = data.decode()
-        command, *args = message.split()
+            message = data.decode('utf-8')
 
-        if command == "AUTH":
-            username, password = args
+            # Обрабатываем data как бинарные данные, без попыток декодирования в строку
+            # Добавим пример обработки бинарных данных
+            username, password = data.split(b'\0')
+            username = username.decode('utf-8')
+            password = password.decode('utf-8')
+
             client_id = server.authenticate_client(username, password)
             if client_id is not None:
-                writer.write(f"AUTH_SUCCESS {client_id}\n".encode())
+                response = f"AUTH_SUCCESS {client_id}\n".encode('utf-8')
             else:
-                writer.write(b"AUTH_FAIL\n")
-            await writer.drain()
-        elif command == "ADD_CLIENT":
-            username, password = args
-            client_id = server.add_client(username, password)
-            writer.write(f"CLIENT_ADDED {client_id}\n".encode())
-            await writer.drain()
-        elif command == "GET_ALL_CLIENTS":
-            clients = server.get_all_clients()
-            writer.write(f"ALL_CLIENTS {clients}\n".encode())
-            await writer.drain()
-        elif command == "GET_ALL_VMS":
-            vms = server.get_all_virtual_machines()
-            writer.write(f"ALL_VMS {vms}\n".encode())
-            await writer.drain()
-        else:
-            writer.write(b"UNKNOWN_COMMAND\n")
+                response = b"AUTH_FAIL\n"
+
+            writer.write(response)
             await writer.drain()
 
-    writer.close()
+    except asyncio.CancelledError:
+        # Обработка отмены задачи
+        pass
+
+    except Exception as e:
+        print(f"Error handling client: {e}")
+
+    finally:
+        try:
+            if not writer.is_closing():
+                writer.write_eof()
+                await writer.drain()
+                await asyncio.sleep(1)  # Подождите 1 секунду перед закрытием соединения
+                writer.close()
+                await writer.wait_closed()
+        except Exception as e:
+            print(f"Error closing connection: {e}")
 
 async def main():
     server = Server()
@@ -106,7 +112,6 @@ async def main():
         await handle_client(reader, writer, server)
 
     server = await asyncio.start_server(handle_client_wrapper, *server_address, reuse_address=True)
-
 
     async with server:
         await server.serve_forever()
