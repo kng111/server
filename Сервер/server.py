@@ -1,119 +1,256 @@
-import asyncio
-import sqlite3
+from socket import *
+from threading import Thread
+from os import getcwd, listdir, mkdir
+from cryptography.fernet import Fernet
+import json, sqlite3 as sql, base64
+
+
+class User:
+	def __init__(self, ip, level, password):
+		self.ip = ip
+		self.level = level
+		self.password = password
+		self.con = None
+		self.cur = None
+
+		key = ''
+		symbols = {
+			'0' : 'Q', '1' : 'W', '2' : 'E', '3' : 'R', '4' : 'T', '5' : 'Y', '6' : 'U', '7' : 'I', '8' : 'O', '9' : 'P',
+		}
+		p = ip.replace('.', '')
+		i = 0
+		key = ''
+		while len(key) != 32:
+			key = f'{key}{symbols[p[i]]}'
+			i += 1
+			if i == len(p):
+				i = 0
+		key = key.encode()
+		self.key = base64.urlsafe_b64encode(key)
+
+		if (ip in listdir(getcwd())):
+			self.bases = [x.replace('.db', '') for x in listdir(f'{getcwd()}\\{ip}')]
+		else:
+			self.bases = []
+
 
 class Server:
-    def __init__(self):
-        self.clients = {}
-        self.db_connection = sqlite3.connect('virtual_machines.db')
-        self.create_tables()
+	def __init__(self, ip, port):
+		self.ser = socket(AF_INET, SOCK_STREAM)
+		self.ser.bind((ip, port))
+		self.ser.listen(5)
 
-    def create_tables(self):
-        cursor = self.db_connection.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS virtual_machines (
-                id INTEGER PRIMARY KEY,
-                client_id INTEGER,
-                ram INTEGER,
-                cpu INTEGER,
-                disk_size INTEGER,
-                disk_id INTEGER,
-                FOREIGN KEY (client_id) REFERENCES clients(id)
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS clients (
-                id INTEGER PRIMARY KEY,
-                username TEXT,
-                password TEXT
-            )
-        ''')
-        self.db_connection.commit()
-
-    def authenticate_client(self, username, password):
-        cursor = self.db_connection.cursor()
-        cursor.execute('SELECT id FROM clients WHERE username=? AND password=?', (username, password))
-        result = cursor.fetchone()
-        if result:
-            return result[0]
-        else:
-            return None
-
-    def add_client(self, username, password):
-        cursor = self.db_connection.cursor()
-        cursor.execute('INSERT INTO clients (username, password) VALUES (?, ?)', (username, password))
-        client_id = cursor.lastrowid
-        self.db_connection.commit()
-        return client_id
-
-    def add_virtual_machine(self, client_id, ram, cpu, disk_size, disk_id):
-        cursor = self.db_connection.cursor()
-        cursor.execute('INSERT INTO virtual_machines (client_id, ram, cpu, disk_size, disk_id) VALUES (?, ?, ?, ?, ?)',
-                       (client_id, ram, cpu, disk_size, disk_id))
-        self.db_connection.commit()
-
-    def get_all_clients(self):
-        cursor = self.db_connection.cursor()
-        cursor.execute('SELECT * FROM clients')
-        return cursor.fetchall()
-
-    def get_all_virtual_machines(self):
-        cursor = self.db_connection.cursor()
-        cursor.execute('SELECT * FROM virtual_machines')
-        return cursor.fetchall()
+		self.blocked = []
+		self.users = []
 
 
-async def handle_client(reader, writer, server):
-    try:
-        while True:
-            data = await reader.read(100)
-            if not data:
-                break
+	def save(self):
+		data = {}
+		for user in self.users:
+			data.update({user.ip : [user.level, user.password]})
+		data = json.dumps(data)
+		data = json.loads(str(data))
+		with open('data.json', 'w', encoding='utf-8') as file:
+			json.dump(data, file, indent=4)
 
-            message = data.decode('utf-8')
 
-            # Обрабатываем data как бинарные данные, без попыток декодирования в строку
-            # Добавим пример обработки бинарных данных
-            username, password = data.split(b'\0')
-            username = username.decode('utf-8')
-            password = password.decode('utf-8')
+	def load(self):
+		data = None
+		with open('data.json', 'r', encoding='utf-8') as file:
+			data = json.load(file)
+		for ip in data:
+			self.users.append(User(ip, data[ip][0], data[ip][1]))
 
-            client_id = server.authenticate_client(username, password)
-            if client_id is not None:
-                response = f"AUTH_SUCCESS {client_id}\n".encode('utf-8')
-            else:
-                response = b"AUTH_FAIL\n"
 
-            writer.write(response)
-            await writer.drain()
+	def get_user(self, ip):
+		for user in self.users:
+			if user.ip == ip:
+				return user
+		return None
 
-    except asyncio.CancelledError:
-        # Обработка отмены задачи
-        pass
 
-    except Exception as e:
-        print(f"Error handling client: {e}")
+	def sender(self, user, key, text):
+		f = Fernet(key)
+		try:
+			text = text.encode()
+			user.send(f.encrypt(text))
+		except Exception as e:
+			print('Client disconnected!')
 
-    finally:
-        try:
-            if not writer.is_closing():
-                writer.write_eof()
-                await writer.drain()
-                await asyncio.sleep(1)  # Подождите 1 секунду перед закрытием соединения
-                writer.close()
-                await writer.wait_closed()
-        except Exception as e:
-            print(f"Error closing connection: {e}")
 
-async def main():
-    server = Server()
-    server_address = ('127.0.0.1', 2000)
+	def get_msg(self, user, key):
+		data = user.recv(1024)
+		f = Fernet(key)
+		data = f.decrypt(data)
+		return data.decode()
 
-    async def handle_client_wrapper(reader, writer):
-        await handle_client(reader, writer, server)
 
-    server = await asyncio.start_server(handle_client_wrapper, *server_address, reuse_address=True)
 
-    async with server:
-        await server.serve_forever()
+	def auth(self, user, addr):
 
-asyncio.run(main())
+		user_ip = addr[0]
+		user_port = addr[1]
+
+		if not(user_ip in self.blocked):#Если пользователь не заблокирован
+
+			this_user = self.get_user(addr[0])
+
+			if this_user == None:
+				self.users.append(User(addr[0], 'low level user', 'root'))
+				self.save()
+				this_user = self.get_user(addr[0])
+
+			if this_user.password != '':
+				self.sender(user, this_user.key, 'Type you password.')
+				try:
+					user_password = self.get_msg(user, this_user.key)
+				except Exception as e:
+					user_password = None
+
+				if user_password == this_user.password:
+					self.sender(user, this_user.key, 'Access is allowed!')
+					self.listen(user, addr)
+
+				else:
+					self.sender(user, this_user.key, 'Access denied!')
+					user.close()
+
+			else:
+				self.sender(user, this_user.key, 'Access is allowed!')
+				self.listen(user, addr)
+
+		else:
+			self.sender(user, this_user.key, 'Access denied!')
+			user.close()
+
+
+	def start_server(self):
+		while True:
+			user, addr = self.ser.accept()
+			Thread(target=self.auth, args=(user, addr, )).start()
+
+
+	def listen(self, user, addr):
+		is_work = True
+		while is_work:
+
+			try:
+				data = self.get_msg(user, self.get_user(addr[0]).key)
+			except Exception as e:
+				print('Client disconnected!')
+				data = ''
+				is_work = False
+
+			if len(data) > 0:
+				msg = data
+
+				if msg in ('disconnect', 'exit'):
+					print('Client disconnected!')
+					user.close()
+					is_work = False
+				
+				else:
+					# user message processing
+
+					this_user = self.get_user(addr[0])
+					if this_user:
+
+						if msg == 'get access level':
+							self.sender(user, this_user.key, this_user.level)
+
+
+						elif msg == 'get my bases':
+							ans = ''
+							if (addr[0] in listdir(getcwd())):
+								ans = '\n'.join([x.replace('.db', '') for x in listdir(f'{getcwd()}\\{addr[0]}')])
+							ans = ans.strip()
+
+							if ans.replace('\n', ''):
+								self.sender(user, this_user.key, ans)
+							else:
+								self.sender(user, this_user.key, 'You have not bases!')
+
+
+						elif msg.startswith('create base '):
+							if not(addr[0] in listdir(getcwd())):
+								mkdir(addr[0])
+							base_name = f"{msg.replace('create base ', '', 1).strip()}.db"
+							path = str(f'{getcwd()}\\{addr[0]}\\{base_name}')
+
+							if base_name != '.db':
+								if not(base_name in listdir(f'{getcwd()}\\{addr[0]}')):
+									with open(path, 'w') as base:
+										base.close()
+									this_user.bases.append(base_name.replace('.db', ''))
+									self.sender(user, this_user.key, 'Base created!')
+								else:
+									self.sender(user, this_user.key, 'Base is exists!')
+							else:
+								self.sender(user, this_user.key, 'Error base name!')
+
+
+						elif msg.startswith('set password '):
+							password = msg.replace('set password ', '', 1)
+							this_user.password = password
+							self.sender(user, this_user.key, 'You password updated!')
+
+
+						elif msg.startswith('connect to '):
+							base_name = msg.replace('connect to ', '', 1)
+							if base_name in this_user.bases:
+								
+								this_user.con = sql.connect(f"{getcwd()}\\{addr[0]}\\{base_name}.db")
+								this_user.cur = this_user.con.cursor()
+
+								self.sender(user, this_user.key, f'You are connected to base <{base_name}>!')
+
+							else:
+								self.sender(user, this_user.key, f'You have not base <{base_name}>!')
+
+
+						elif msg == 'close base':
+							if this_user.con != None:
+								
+								this_user.cur.close()
+								this_user.con.close()
+								this_user.cur = None
+								this_user.con = None
+
+								self.sender(user, this_user.key, 'You are disconnected from base!')
+
+							else:
+								self.sender(user, this_user.key, 'You are not connected to base now!')
+
+
+						else:
+							if (this_user.con != None) and (this_user.cur != None):
+								try:
+									data = str([x for x in this_user.cur.execute(msg)])
+									this_user.con.commit()
+									if data != '[]':
+										self.sender(user, this_user.key, data)
+									else:
+										self.sender(user, this_user.key, 'default answer')
+								except Exception as e:
+									self.sender(user, this_user.key, f'Error: {str(e)}!')
+							else:
+								self.sender(user, this_user.key, 'You are not connected to base now!')
+
+
+					else:
+						user.close()
+						print('Client disconnected!')
+						is_work = False
+
+				self.save()
+
+			else:
+				user.close()
+				print('Client disconnected!')
+				is_work = False
+
+
+if __name__ == '__main__':
+	serv = Server(input('Enter server ip: '), 2000)
+	serv.load()
+	serv.start_server()
