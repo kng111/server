@@ -22,12 +22,18 @@
 
 import sqlite3
 
-conn = sqlite3.connect('example.db')
+conn = sqlite3.connect(r'C:\Users\yakvl\Documents\GitHub\server\newserv\example.db')
 cursor = conn.cursor()
 
-cursor.execute('''CREATE TABLE IF NOT EXISTS sessions (
-                      id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      ip TEXT,
-                      user_id INTEGER,
-                      time_online TEXT,
-                      is_online INTEGER DEFAULT 0)''')
+# cursor.execute('''CREATE TABLE IF NOT EXISTS sessions (
+#                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+#                       ip TEXT,
+#                       user_id INTEGER,
+#                       time_online TEXT,
+#                       is_online INTEGER DEFAULT 0)''')
+
+
+
+cursor.execute('SELECT sum(disk_size) FROM machines')
+disk_size = cursor.fetchone()
+print(disk_size[0] / 1024)

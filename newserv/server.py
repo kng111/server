@@ -5,7 +5,6 @@ from passlib.hash import pbkdf2_sha256
 from datetime import datetime
 
 async def handle(request):
-    print(111)
     data = await request.json()
     ram = data.get('ram', None)
     ram = round(ram / 1024 / 1024) if ram is not None else None
@@ -39,20 +38,15 @@ async def handle(request):
 
     try:
         cursor.execute('SELECT * FROM users WHERE ip = ?', (client_ip,))
-        print(1)
         existing_user = cursor.fetchone()
-        print(2)
 
         if existing_user:
-            print(3)
             password_attempt = data.get('password', None)
 
             if not password_attempt:
-                print(4)
                 return web.Response(text="Password is required", status=400)
 
             if pbkdf2_sha256.verify(password_attempt, existing_user[2]):
-                print(5)
                 response_text = f"User logged in successfully, user_id: {existing_user[0]}, level: {existing_user[3]}"
                 
                 # Обновление данных в таблице sessions
@@ -60,27 +54,22 @@ async def handle(request):
                             (client_ip, existing_user[0], datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 1))
                 
                 if existing_user[3] == 'admin':
-                    print(6)
                     pass
                     # Выполнение действий, доступных только админу
                     # ...
                     
                 else:
-                    print(7)
                     pass
                     # Действия для обычного пользователя
                     # ...
                     
             else:
-                print(8)
                 response_text = "Invalid password. Connection closed."
 
         else:
-            print(9)
             password = data.get('password', None)
 
             if not password:
-                print(10)
                 return web.Response(text="Password is required", status=400)
 
             password_hash = pbkdf2_sha256.hash(password)
@@ -102,46 +91,16 @@ async def handle(request):
         conn.commit()
 
     except sqlite3.Error as e:
-        print(11)
         conn.rollback()
         response_text = f"Error processing request: {e}"
 
     finally:
-        print(12)
         conn.close()
-    print(13)
+
     return web.Response(text=response_text)
 
 
-async def get_all_clients(request):
-    # Ваш код для получения списка всех подключенных клиентов
-    # Этот метод должен вернуть ответ в формате JSON
-    return web.json_response({"message": "List of all clients"})
 
-async def get_authorized_clients(request):
-    # Ваш код для получения списка всех авторизованных клиентов
-    # Этот метод должен вернуть ответ в формате JSON
-    return web.json_response({"message": "List of authorized clients"})
-
-async def get_all_history_clients(request):
-    # Ваш код для получения списка всех когда-либо подключенных клиентов
-    # Этот метод должен вернуть ответ в формате JSON
-    return web.json_response({"message": "List of all history clients"})
-
-async def exit_server(request):
-    # Ваш код для обработки выхода клиента с сервера
-    # Этот метод должен вернуть ответ в формате JSON
-    return web.json_response({"message": "Client exited"})
-
-async def update_client_data(request):
-    # Ваш код для обновления данных авторизованного клиента
-    # Этот метод должен вернуть ответ в формате JSON
-    return web.json_response({"message": "Client data updated"})
-
-async def get_all_disks(request):
-    # Ваш код для получения списка всех жестких дисков
-    # Этот метод должен вернуть ответ в формате JSON
-    return web.json_response({"message": "List of all disks"})
 
 async def helps(request):
     user_id = request.query.get('user_id', None)
@@ -231,43 +190,6 @@ async def update_ram(request):
 
     return web.Response(text=response_text)
 
-# import websockets
-# async def ws_handler(request):
-#     user_ip = request.query.get('ip', None)
-
-#     if not user_ip:
-#         return web.Response(text="IP parameter is required", status=400)
-
-#     ws = web.WebSocketResponse()
-#     await ws.prepare(request)
-
-#     while True:
-#         try:
-#             conn = sqlite3.connect('example.db')
-#             cursor = conn.cursor()
-#             cursor.execute('SELECT * FROM machines WHERE ip = ?', (user_ip,))
-#             machine_info = cursor.fetchone()
-#             conn.close()
-
-#             if not machine_info:
-#                 await ws.send_str(f"No information found for IP: {user_ip}")
-#             else:
-#                 response_text = f"Machine Info for IP: {user_ip}\n" \
-#                                 f"RAM: {machine_info[3]}\n" \
-#                                 f"CPU: {machine_info[4]}\n" \
-#                                 f"Disk Size: {machine_info[5]}\n" \
-#                                 f"Disk ID: {machine_info[6]}"
-#                 await ws.send_str(response_text)
-
-#             await asyncio.sleep(5)
-
-#         except web.WebSocketError:
-#             # Если возникает ошибка WebSocketError, это может означать разрыв соединения
-#             print(f"WebSocket connection error for IP: {user_ip}")
-#             break
-
-#     return ws
-
 
 
 async def get_all_clients(request):
@@ -284,6 +206,26 @@ async def get_all_clients(request):
 
     except sqlite3.Error as e:
         response_text = f"Error retrieving clients: {e}"
+    finally:
+        conn.close()
+
+    return web.Response(text=response_text)
+
+
+async def get_all_users(request):
+    conn = sqlite3.connect('example.db')
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('SELECT * FROM users')
+        all_clients = cursor.fetchall()
+
+        response_text = "All Connected USERS:\n\n"
+        for client in all_clients:
+            response_text += f"USERS ID: {client[0]}, IP: {client[1]}, LEVEL: {client[3]}\n"
+
+    except sqlite3.Error as e:
+        response_text = f"Error retrieving USERS: {e}"
     finally:
         conn.close()
 
@@ -357,12 +299,12 @@ async def get_all_disks(request):
     cursor = conn.cursor()
 
     try:
-        cursor.execute('SELECT * FROM disks')
+        cursor.execute('SELECT disk_id,disk_size,user_id FROM machines')
         all_disks = cursor.fetchall()
 
         response_text = "All Disks:\n"
         for disk in all_disks:
-            response_text += f"Disk ID: {disk[0]}, Disk Size: {disk[1]}, Disk Type: {disk[2]}, Client ID: {disk[3]}\n"
+            response_text += f"Client ID: {disk[2]}, Disk ID: {disk[0]}, Disk Size: {disk[1]}\n"
 
     except sqlite3.Error as e:
         response_text = f"Error retrieving disks: {e}"
@@ -402,8 +344,116 @@ async def update_user_status_on_exit(request):
         conn.close()
 
 
+async def update_password(request):
+    user_id = request.query.get('user_id', None)
+    password_hash = request.query.get('password', None)  # Исправлено название параметра
+
+    if not all([user_id, password_hash]):
+        return web.Response(text="Both user_id and password parameters are required", status=400)
+
+    conn = sqlite3.connect('example.db')
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('SELECT level FROM users WHERE id = ?', (user_id,))
+        user_level = cursor.fetchone()
+
+        if user_level and user_level[0] == 'admin':
+            password_hash = pbkdf2_sha256.hash(password_hash)
+            cursor.execute('UPDATE users SET password_hash = ? WHERE id = ?', (password_hash, user_id)) 
+            conn.commit()
+            response_text = f"Password updated successfully for user_id: {user_id}"
+        else:
+            response_text = "Permission denied. Only admin users can update password."
+
+    except sqlite3.Error as e:
+        conn.rollback()
+        response_text = f"Error processing request: {e}"
+
+    finally:
+        conn.close()
+
+    return web.Response(text=response_text)
 
 
+async def delete_user(request):
+    user_id_to_delete = request.query.get('user_id', None)
+    id_user = request.query.get('id_user', None)
+
+    if not all([user_id_to_delete, id_user]):
+        return web.Response(text="Both user_id and id_user parameters are required", status=400)
+
+    conn = sqlite3.connect('example.db')
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('SELECT level FROM users WHERE id = ?', (user_id_to_delete,))
+        user_level = cursor.fetchone()
+
+        if user_level and user_level[0] == 'admin':
+            cursor.execute('DELETE FROM users WHERE id = ?', (id_user,))
+            conn.commit()
+            response_text = f"User deleted successfully. User_id: {id_user}"
+            return web.Response(text=response_text)
+        else:
+            response_text = "Permission denied. Only admin users can delete users."
+            return web.Response(text=response_text, status=403)  # 403 Forbidden
+
+    except sqlite3.Error as e:
+        conn.rollback()
+        response_text = f"Error processing request: {e}"
+        return web.Response(text=response_text, status=500)  # 500 Internal Server Error
+
+    finally:
+        conn.close()
+
+
+async def disk_size_all(request):
+
+
+
+    conn = sqlite3.connect('example.db')
+    cursor = conn.cursor()
+    try:
+
+        cursor.execute('SELECT sum(disk_size) FROM machines')
+        disk_size1 = cursor.fetchone()
+        response_text = f"\ndisk_size_all: {disk_size1[0]} mb OR {disk_size1[0]/1024} gb\n"
+
+    except sqlite3.Error as e:
+        conn.rollback()
+        response_text = f"Error processing request: {e}"
+        return web.Response(text=response_text, status=500)  # 500 Internal Server Error
+
+    finally:
+        conn.close()
+    return web.Response(text=response_text)
+
+
+
+async def ram_all(request):
+
+
+
+    conn = sqlite3.connect('example.db')
+    cursor = conn.cursor()
+    try:
+
+        cursor.execute('SELECT sum(ram) FROM machines')
+        disk_size1 = cursor.fetchone()
+        response_text = f"\nram_all: {disk_size1[0]} mb OR {disk_size1[0]/1024} gb\n"
+
+    except sqlite3.Error as e:
+        conn.rollback()
+        response_text = f"Error processing request: {e}"
+        return web.Response(text=response_text, status=500)  # 500 Internal Server Error
+
+    finally:
+        conn.close()
+    return web.Response(text=response_text)
+
+
+    
 async def init_app():
     app = web.Application()
     app.router.add_get('/helps', helps)
@@ -411,6 +461,7 @@ async def init_app():
     app.router.add_get('/machine_info', get_machine_info)
     app.router.add_get('/update_ram', update_ram)
     # app.router.add_get('/ws', ws_handler)
+    app.router.add_get('/get_all_users', get_all_users)
     app.router.add_get('/get_all_clients', get_all_clients)
     app.router.add_get('/get_authorized_clients', get_authorized_clients)
     app.router.add_get('/get_all_history_clients', get_all_history_clients)
@@ -418,7 +469,10 @@ async def init_app():
     app.router.add_get('/update_client_data', update_client_data)
     app.router.add_get('/get_all_disks', get_all_disks)
     app.router.add_get('/update_user_status_on_exit', update_user_status_on_exit)
-
+    app.router.add_get('/update_password', update_password)
+    app.router.add_get('/delete_user', delete_user)
+    app.router.add_get('/disk_size_all', disk_size_all)
+    app.router.add_get('/ram_all', ram_all)
     return app
 
 if __name__ == '__main__':

@@ -4,6 +4,7 @@ import os
 import psutil
 import platform
 import socket
+from passlib.hash import pbkdf2_sha256
 
 async def get_disk_serial():
     try:
@@ -88,10 +89,14 @@ async def extract_user_info(response):
     return user_id, user_level
 
 
-# async def update_user_status_on_exit(session, user_id, url_serv):
-#     url = f'http://{url_serv}/update_user_status_on_exit?user_id={user_id}'
-#     async with session.get(url) as response:
-#         return await response.text()
+
+
+
+async def get_all_disks(session, user_id, url_serv):
+    url = f'http://{url_serv}/get_all_disks?user_id={user_id}'
+    async with session.get(url) as response:
+        return await response.text()
+
 
 
 
@@ -104,14 +109,8 @@ async def update_user_status_on_exit(user_id, url_serv):
         except  aiohttp.ClientConnectorError as e:
             print(f"An error occurred during exit_server: {e}")
 
-async def update_client_data(session, user_id, url_serv):
-    url = f'http://{url_serv}/update_client_data?user_id={user_id}'
-    async with session.get(url) as response:
-        return await response.text()
 
-# Добавьте аналогичные методы для других действий
 
-# В вашем цикле main добавьте соответствующие ветвления для новых действий
 async def get_all_history_clients(session, user_id, url_serv):
     url = f'http://{url_serv}/get_all_history_clients?user_id={user_id}'
     async with session.get(url) as response:
@@ -124,9 +123,46 @@ async def update_client_data(session, user_id, url_serv):
     async with session.get(url) as response:
         return await response.text()
 
-async def main():
-    url_serv = '127.0.0.1:8080'
 
+async def update_password(session, user_id, url_serv,new_password):
+    url = f'http://{url_serv}/update_password?user_id={user_id}&password={new_password}'
+    async with session.get(url) as response:
+        return await response.text()
+
+async def delete_user(session, user_id, url_serv,id_user):
+    url = f'http://{url_serv}/delete_user?user_id={user_id}&id_user={id_user}'
+    async with session.get(url) as response:
+        return await response.text()
+
+
+async def disk_size_all(session, user_id, url_serv):
+    url = f'http://{url_serv}/disk_size_all?user_id={user_id}'
+    async with session.get(url) as response:
+        return await response.text()
+    
+
+async def ram_all(session, user_id, url_serv):
+    url_serv = f'http://{url_serv}/ram_all?user_id={user_id}'
+    async with session.get(url_serv) as response:
+        return await response.text()
+
+async def get_all_clients(session, user_id, url_serv):
+    url_serv = f'http://{url_serv}/get_all_clients?user_id={user_id}'
+    async with session.get(url_serv) as response:
+        return await response.text()
+
+
+async def get_all_users(session, user_id, url_serv):
+    url_serv = f'http://{url_serv}/get_all_users?user_id={user_id}'
+    async with session.get(url_serv) as response:
+        return await response.text()
+
+
+
+
+async def main():
+    url_serv = input("Enter url server: ")
+    # '127.0.0.1:8080'
     password = input("Enter password: ")
 
     async with aiohttp.ClientSession() as session:
@@ -141,13 +177,13 @@ async def main():
                 if action.lower() == 'q':
                     break
 
-                elif action.lower() == 'my_':
+                elif action.lower() == 'my':
                     machine_info = await get_machine_info(session, user_id,url_serv)
                     print(f"\nMachine Info:\n{machine_info}\n")
 
                 elif action.lower() == 'update_ram':
                     if user_level == 'admin':
-                        # Поменять сделаать так что бы только инт можно было
+                        # Поменять, сделаать так что бы только инт можно было
                         new_ram = int(input("Enter new RAM size: "))
                         response = await update_ram(session, user_id, new_ram,url_serv)
                         print(f"Server Response: {response}")
@@ -157,9 +193,50 @@ async def main():
                 elif action.lower() == 'helps':
                     help_response = await helps(session, user_id, url_serv)
                     print(f"\nHelp Response:\n{help_response}\n")
-                elif action.lower() == 'all_h':
-                    all_history = await get_all_history_clients(session, user_id, url_serv)
-                    print(f'All_history:{all_history}')
+                elif action.lower() == 'all_h' :
+                    if user_level == 'admin':
+                        all_history = await get_all_history_clients(session, user_id, url_serv)
+                        print(f'All_history:{all_history}')
+                    else:
+                        print("y dont admin")
+
+                elif action.lower() == 'get_all_disks':
+                    if user_level == 'admin':
+                        get_all_disks_x = await get_all_disks(session, user_id, url_serv)
+
+                        print(f"\n:{get_all_disks_x}\n")
+                    else:
+                        print("y dont admin")
+
+                elif action.lower() == 'update_password':
+                    new_password = input("Enter new Password: ")
+                    help_response = await update_password(session, user_id, url_serv,new_password)
+                    print(f"\n:{help_response}\n")
+
+                elif action.lower() == 'delete_user':
+                    if user_level == 'admin':
+                        id_user = input("Enter id users: ")
+                        delete_user_x = await delete_user(session, user_id, url_serv,id_user)
+                        print(f"\n:{delete_user_x}\n")
+                    else:
+                        print("y dont admin")
+
+                elif action.lower() == 'disk_size_all':
+                    disk_size_all_x = await disk_size_all(session, user_id, url_serv)
+                    print(disk_size_all_x)
+
+                elif action.lower() == 'ram_all':
+                    ram_all_x = await ram_all(session, user_id, url_serv)
+                    print(f'\n{ram_all_x}\n')
+
+                elif action.lower() == 'get_all_clients':
+                    if user_level == 'admin':
+                        all_client_x = await get_all_clients(session, user_id, url_serv)
+                        print(f"\n:{all_client_x}\n")
+                elif action.lower() == 'get_all_users':
+                    if user_level == 'admin':
+                        all_client_x = await get_all_users(session, user_id, url_serv)
+                        print(f"\n:{all_client_x}\n")
 
             
 
